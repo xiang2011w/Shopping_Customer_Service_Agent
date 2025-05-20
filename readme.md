@@ -104,7 +104,7 @@ This project uses LangGraph to implement a state machine for conversation flow:
 6. **Eligibility Checking**: Determines if the order is eligible for return
 7. **End State**: Gracefully terminates the conversation
 
-![Return Agent Conversation Flow](conversation_flow.png) 
+![Return Agent Conversation Flow](img/conversation_flow.png) 
 
 ### RAG System
 
