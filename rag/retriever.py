@@ -6,6 +6,7 @@ load_dotenv()  # Ensure .env is loaded
 
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 VECTORSTORE_DIR = "rag/vectorstore"
 
@@ -111,3 +112,18 @@ if __name__ == "__main__":
             if match:
                 found_order = match.group(1)
                 print(f"  Found order number: {found_order} instead")
+
+    # 1. Load your document(s)
+    document_text = "Order number: 1234\nProduct: Widget\nDetails: ..."
+
+    # 2. Split into chunks
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=300,  # Adjust as needed
+        chunk_overlap=50,  # Overlap to preserve context
+    )
+    chunks = splitter.split_text(document_text)
+
+    # 3. Embed and add to vectorstore
+    embeddings = OpenAIEmbeddings()
+    vectorstore = FAISS.from_texts(chunks, embeddings)
+    vectorstore.save_local("rag/vectorstore")

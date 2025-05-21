@@ -1,4 +1,5 @@
 import os
+import re
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -21,6 +22,12 @@ def load_markdown_files(order_dir):
     return docs
 
 
+def split_by_order(text):
+    return [
+        chunk.strip() for chunk in re.split(r"(?=Order number:)", text) if chunk.strip()
+    ]
+
+
 def main():
     # 1. Load all order .md files
     docs = load_markdown_files(ORDER_DIR)
@@ -28,16 +35,17 @@ def main():
     # 2. Split each document into chunks for better retrieval granularity
     #    Here we use RecursiveCharacterTextSplitter from LangChain.
     #    This splits text into ~500 character chunks with 50 character overlap.
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=100, chunk_overlap=50)
 
     all_chunks = []
     metadatas = []
     for fname, content in docs:
-        # Split the content into chunks
-        chunks = text_splitter.split_text(content)
+        chunks = split_by_order(content)
         all_chunks.extend(chunks)
-        # Store metadata for each chunk (filename for traceability)
-        metadatas.extend([{"source": fname}] * len(chunks))
+        for chunk in chunks:
+            match = re.search(r"Order number: (\d+)", chunk)
+            order_number = match.group(1) if match else None
+            metadatas.append({"source": fname, "order_number": order_number})
 
     # 3. Generate embeddings for each chunk using OpenAI
     embeddings = OpenAIEmbeddings()
