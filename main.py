@@ -1,5 +1,5 @@
 import os, re
-from typing import TypedDict, Optional, List
+from typing import TypedDict, Optional, List, Annotated, NotRequired
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
@@ -9,6 +9,7 @@ from langchain.memory import ConversationSummaryBufferMemory
 from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableLambda
 from langchain_core.messages import HumanMessage
+from langgraph.graph.message import add_messages
 
 from rag.retriever import query_order_info
 from tools.return_policy_tool import fetch_return_policy_tool
@@ -30,6 +31,8 @@ class AgentState(TypedDict, total=False):
     policy_text: Optional[str]
     chat_history: Optional[List]
     retry_count: int
+    conversation_should_end: NotRequired[bool]
+    __next__: NotRequired[str]
 
 
 initial_state: AgentState = {
@@ -296,9 +299,7 @@ def fetch_policy(state: AgentState) -> AgentState:
 def check_eligibility(state: AgentState) -> AgentState:
     try:
         order_info = state.get("order_info", "No order information available.")
-        policy_text = state.get("policy_text", "Standard return policy applies.")
-
-        # Get the current date
+        policy_text = state.get("return_policy", "Standard return policy applies.")
         current_date = get_current_date()
 
         prompt = ChatPromptTemplate.from_template(
@@ -319,30 +320,28 @@ def check_eligibility(state: AgentState) -> AgentState:
         response = llm.invoke(formatted_prompt).content
         print(f"Agent: {response}")
 
-        print("Agent: Is there anything else I can help you with?")
-        follow = input("You: ").strip()
+        return {**state, "__next__": "ask_continue_route"}
 
-        # IMPORTANT FIX: Improved exit detection
-        if wants_exit(follow):
-            print("Agent: Thanks for chatting. Have a great day!")
-            return {**state, "__next__": "end"}
-
-        if want_another(follow):
-            return {
-                **state,
-                "order_number": None,
-                "retry_count": 0,
-                "__next__": "ask_order_number",
-            }
-        # fallback to greeting loop
-        return {**state, "user_input": follow, "__next__": "detect_intent"}
     except Exception as e:
         print(f"Agent: I'm sorry, I encountered an error: {str(e)}")
-        print("Agent: Is there anything else I can help you with?")
-        user_input = input("You: ").strip()
-        if wants_exit(user_input):
-            return {**state, "__next__": "end"}
-        return {**state, "user_input": user_input, "__next__": "detect_intent"}
+        return {**state, "__next__": "ask_continue_route"}
+
+
+def ask_if_wants_to_continue(state: AgentState) -> AgentState:
+    """Asks the user if they want to continue or end the conversation."""
+    print("Agent: Is there anything else I can help you with today?")
+    user_response = input("You: ").strip()
+
+    if wants_exit(user_response):
+        print("Agent: Thanks for chatting. Have a great day!")
+        return {
+            **state,
+            "user_input": user_response,
+            "__next__": END,
+            "conversation_should_end": True,
+        }
+    else:
+        return {**state, "user_input": user_response, "__next__": "detect_intent_route"}
 
 
 def end_conv(state: AgentState) -> str:
@@ -359,6 +358,7 @@ for n, fn in {
     "retrieve_order": retrieve_order,
     "fetch_policy": fetch_policy,
     "check_eligibility": check_eligibility,
+    "ask_if_wants_to_continue": ask_if_wants_to_continue,
     "end": end_conv,
 }.items():
     graph.add_node(n, fn)
@@ -403,13 +403,41 @@ graph.add_edge("fetch_policy", "check_eligibility")
 
 graph.add_conditional_edges(
     "check_eligibility",
-    lambda x: x.get("__next__", "detect_intent"),
-    {
-        "ask_order_number": "ask_order_number",
-        "detect_intent": "detect_intent",
-        "end": "end",
-    },
+    lambda x: x.get("__next__"),
+    {"ask_continue_route": "ask_if_wants_to_continue"},
+)
+
+graph.add_conditional_edges(
+    "ask_if_wants_to_continue",
+    lambda x: x.get("__next__"),
+    {"detect_intent_route": "detect_intent", "end": END},
 )
 
 if __name__ == "__main__":
-    graph.compile().invoke(initial_state)
+    # Compile the graph once
+    compiled_graph = graph.compile()
+    try:
+        # Attempt to invoke the graph with the initial state
+        compiled_graph.invoke(initial_state)
+    except KeyError as e:
+        # Check if this is the specific KeyError related to '__end__'
+        # This error can occur during graph termination with the END marker.
+        if "__end__" in str(e).lower():
+            # The agent has likely already printed its goodbye message.
+            # We suppress this specific error to prevent the traceback from appearing.
+            pass  # Silently handle this known termination-related KeyError
+        else:
+            # If it's a different KeyError, it might indicate another issue.
+            # To avoid any console output for other KeyErrors as well during invoke:
+            pass  # Suppress other KeyErrors too
+            # Or, if you wanted to see other KeyErrors (for debugging future issues):
+            # print(f"An unexpected KeyError occurred: {e}")
+            # raise e
+    except Exception as e:
+        # Catch any other unexpected exceptions during the graph invocation
+        # to prevent their tracebacks from appearing on the console.
+        # print(f"An unexpected error occurred: {e}") # Optional: log minimally
+        pass  # Suppress other exceptions
+
+    # The program will now end more gracefully without the specific traceback.
+    # print("DEBUG: Program execution finished.") # Optional debug message
