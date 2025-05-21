@@ -71,6 +71,16 @@ def query_order_info(query, k=1):
                     # Check for exact match first
                     if f"Order number: {query}" in doc.page_content:
                         print(f"✓ Found exact match for order {query}")
+                        # Try to extract delivery date
+                        delivery_match = re.search(
+                            r"Delivery date: (\d{4}-\d{2}-\d{2})", doc.page_content
+                        )
+                        if delivery_match:
+                            delivery_date = delivery_match.group(1)
+                            print(f"✓ Found delivery date: {delivery_date}")
+                        else:
+                            print("✗ No delivery date found in document")
+
                         return [doc]  # Return immediately on exact match
 
                     # Otherwise add to collected results if not seen before
@@ -112,18 +122,3 @@ if __name__ == "__main__":
             if match:
                 found_order = match.group(1)
                 print(f"  Found order number: {found_order} instead")
-
-    # 1. Load your document(s)
-    document_text = "Order number: 1234\nProduct: Widget\nDetails: ..."
-
-    # 2. Split into chunks
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=300,  # Adjust as needed
-        chunk_overlap=50,  # Overlap to preserve context
-    )
-    chunks = splitter.split_text(document_text)
-
-    # 3. Embed and add to vectorstore
-    embeddings = OpenAIEmbeddings()
-    vectorstore = FAISS.from_texts(chunks, embeddings)
-    vectorstore.save_local("rag/vectorstore")

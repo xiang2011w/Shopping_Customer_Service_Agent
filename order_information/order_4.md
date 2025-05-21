@@ -2,9 +2,8 @@ Product category: Yoga Mat
 Brand: FlexMat
 Description: Eco-friendly, non-slip yoga mat with 6mm cushioning, lightweight and easy to carry. Comes with carrying strap and workout guide.
 username: sasha.fields@yahoo.com
-Order date: 2025-05-03
+Delivery date: 2025-05-03
 Order number: 4620198571
-Order status: received
 isPrime: true
 Address:
 

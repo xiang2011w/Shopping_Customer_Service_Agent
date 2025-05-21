@@ -180,7 +180,79 @@ def retrieve_order(state: AgentState) -> AgentState:
 
         # Only proceed if the extracted order number matches the requested one
         if extracted_order and extracted_order == order_number:
-            print(f"Agent: I found your order:\n{order_content}")
+            # Extract delivery date with fallback to direct file check
+            delivery_match = re.search(
+                r"Delivery date:\s*(\d{4}-\d{2}-\d{2})", order_content
+            )
+            delivery_date = None
+
+            if delivery_match:
+                delivery_date = delivery_match.group(1)
+                print(f"Found delivery date in vector results: {delivery_date}")
+            else:
+                # Fallback: Check the order files directly
+                print(
+                    "Delivery date not found in retrieved data. Checking files directly..."
+                )
+                try:
+                    order_dir = "order_information"
+                    print(f"Checking files in {order_dir}")
+                    order_files = os.listdir(order_dir)
+                    print(f"Found {len(order_files)} files: {order_files}")
+
+                    for file in order_files:
+                        if file.endswith(".md"):
+                            file_path = os.path.join(order_dir, file)
+                            print(f"Checking file: {file_path}")
+
+                            with open(file_path, "r", encoding="utf-8") as f:
+                                file_content = f.read()
+                                print(f"File content length: {len(file_content)}")
+                                print(f"Searching for Order number: {order_number}")
+
+                                if f"Order number: {order_number}" in file_content:
+                                    print(f"✅ Found matching order in {file}")
+                                    delivery_match = re.search(
+                                        r"Delivery date:\s*(\d{4}-\d{2}-\d{2})",
+                                        file_content,
+                                    )
+
+                                    if delivery_match:
+                                        delivery_date = delivery_match.group(1)
+                                        print(
+                                            f"✅ Found delivery date in file {file}: {delivery_date}"
+                                        )
+
+                                        # Update order_content to include delivery date
+                                        if "Delivery date:" not in order_content:
+                                            # Insert delivery date at the beginning for visibility
+                                            order_content = f"{order_content}\nDelivery date: {delivery_date}"
+                                    else:
+                                        print(
+                                            f"❌ No delivery date pattern found in {file}"
+                                        )
+                                        # Print a snippet to see what's there
+                                        print(
+                                            f"Content snippet: {file_content[:200]}..."
+                                        )
+                except Exception as e:
+                    print(f"Error checking files directly: {str(e)}")
+                    import traceback
+
+                    traceback.print_exc()
+
+            delivery_date_str = delivery_date if delivery_date else "Not specified"
+            print(
+                f"Agent: I found your order #{extracted_order} (Delivery date: {delivery_date_str}):"
+            )
+            print(f"{order_content}")
+
+            # If delivery date is still missing, add a note
+            if not delivery_date:
+                print(
+                    "Note: This order doesn't specify a delivery date, which may affect return eligibility."
+                )
+
             return {**state, "order_info": order_content, "__next__": "fetch_policy"}
 
         # If order numbers don't match, reject it and ask again
@@ -197,22 +269,28 @@ def retrieve_order(state: AgentState) -> AgentState:
 
 
 def fetch_policy(state: AgentState) -> AgentState:
-    try:
-        print("*************** Agent: Checking return policy...***************")
-        policy_text = fetch_return_policy_tool.invoke("")
-        return {
-            **state,
-            "policy_text": policy_text,
-            "__next__": "check_eligibility",
-        }
-    except Exception as e:
-        print(f"Agent: I had trouble retrieving the return policy: {str(e)}")
-        print("Agent: Let me see what I can tell you about your order anyway.")
-        return {
-            **state,
-            "policy_text": "Standard 30-day return policy applies.",
-            "__next__": "check_eligibility",
-        }
+    """Fetch the return policy and check eligibility based on delivery date."""
+    print("*************** Agent: Checking return policy...***************")
+
+    order_info = state.get("order_info", "")
+
+    # Extract delivery date explicitly to ensure it's correct
+    delivery_match = re.search(r"Delivery date:\s*(\d{4}-\d{2}-\d{2})", order_info)
+    delivery_date = delivery_match.group(1) if delivery_match else None
+
+    if delivery_date:
+        print(f"Passing delivery date to tool: {delivery_date}")
+        # Ensure the delivery date is prominently included in the tool input
+        tool_input = (
+            f"Order information with Delivery date: {delivery_date}\n{order_info}"
+        )
+    else:
+        tool_input = order_info
+
+    # Pass the order info (with delivery date) to the return policy tool
+    policy = fetch_return_policy_tool(tool_input)
+
+    return {**state, "return_policy": policy, "__next__": "assess_eligibility"}
 
 
 def check_eligibility(state: AgentState) -> AgentState:
@@ -225,15 +303,15 @@ def check_eligibility(state: AgentState) -> AgentState:
 
         prompt = ChatPromptTemplate.from_template(
             """
-You are a helpful Amazon return assistant.
-Order Info: {order_info}
-Return Policy: {policy_text}
-Current Date: {current_date}
+            You are a helpful Amazon return assistant.
+            Order Info: {order_info}
+            Return Policy: {policy_text}
+            Current Date: {current_date}
 
-Check if the order is eligible for return based on the return policy and the current date.
-If so, explain how to initiate the return. If not, explain why it's not eligible.
-Be specific about the time window for returns and whether the current date falls within that window.
-"""
+            Check if the order is eligible for return based on the return policy and the current date.
+            If so, explain how to initiate the return. If not, explain why it's not eligible.
+            Be specific about the time window for returns and whether the current date falls within that window.
+            """
         )
         formatted_prompt = prompt.format_messages(
             order_info=order_info, policy_text=policy_text, current_date=current_date
