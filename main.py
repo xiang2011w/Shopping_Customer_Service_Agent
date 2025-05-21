@@ -17,7 +17,7 @@ from tools.return_policy_tool import fetch_return_policy_tool
 load_dotenv()
 
 # ── 1. LLM & Memory ────────────────────────────
-llm = ChatOpenAI(model="gpt-4", temperature=0)
+llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0)
 memory = ConversationSummaryBufferMemory(
     llm=llm, memory_key="chat_history", return_messages=True
 )
